@@ -173,7 +173,7 @@ def actualizar_monedas(data: CambioMonedaRequest):
 
     for producto in productos:
         producto_id = producto.get("id")
-        precios = producto.get("currencies", [])
+        precios = producto.get("prices", [])  # <== Cambiado a 'prices'
         cambios = []
 
         for precio in precios:
