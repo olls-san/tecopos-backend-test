@@ -1,5 +1,5 @@
 from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, validator
 import requests
 import time
 from typing import Optional
@@ -36,6 +36,18 @@ class ProductoEntradaInteligente(BaseModel):
     cantidad: int
     precio: float
     moneda: str = "CUP"
+
+    @validator("cantidad")
+    def validar_cantidad_positiva(cls, v):
+        if v <= 0:
+            raise ValueError("La cantidad debe ser mayor que cero")
+        return v
+
+    @validator("nombre")
+    def validar_nombre_no_vacio(cls, v):
+        if not v.strip():
+            raise ValueError("El nombre del producto no puede estar vacío")
+        return v
 
 class EntradaInteligenteRequest(BaseModel):
     usuario: str
