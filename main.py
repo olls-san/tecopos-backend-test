@@ -208,5 +208,18 @@ def actualizar_monedas(data: CambioMonedaRequest):
     for p in productos_para_actualizar:
         patch_url = f"{base_url}/api/v1/administration/product/{p['id']}"
         patch_payload = {
+            "prices": p["cambios"]
+        }
 
+        patch_response = requests.patch(patch_url, json=patch_payload, headers=headers)
 
+        if patch_response.status_code in [200, 201]:
+            productos_modificados.append(p["nombre"])
+        else:
+            print(f"⚠️ Error modificando '{p['nombre']}': {patch_response.status_code} - {patch_response.text}")
+
+    return {
+        "status": "ok",
+        "mensaje": f"Se actualizó la moneda en {len(productos_modificados)} productos.",
+        "productos_actualizados": productos_modificados
+    }
