@@ -163,12 +163,12 @@ def actualizar_monedas(data: CambioMonedaRequest):
         "User-Agent": "Mozilla/5.0"
     }
 
-    lista_productos = requests.get(list_url, headers=headers)
-    if lista_productos.status_code != 200:
+    response = requests.get(list_url, headers=headers)
+    if response.status_code != 200:
         raise HTTPException(status_code=500, detail="No se pudo obtener productos")
 
-    productos = lista_productos.json().get("items", [])
-    productos_para_cambiar = []
+    productos = response.json().get("items", [])
+    productos_para_actualizar = []
 
     for producto in productos:
         producto_id = producto.get("id")
@@ -177,15 +177,19 @@ def actualizar_monedas(data: CambioMonedaRequest):
         cambios = []
 
         for precio in precios:
-            if precio.get("codeCurrency") == data.moneda_actual:
+            system_price_id = precio.get("systemPriceId")
+            moneda_actual = precio.get("codeCurrency")
+            monto = precio.get("price")
+
+            if moneda_actual == data.moneda_actual and system_price_id:
                 cambios.append({
-                    "systemPriceId": precio.get("systemPriceId"),  # <- Corregido
-                    "price": precio.get("price"),
+                    "systemPriceId": system_price_id,
+                    "price": monto,
                     "codeCurrency": data.nueva_moneda
                 })
 
         if cambios:
-            productos_para_cambiar.append({
+            productos_para_actualizar.append({
                 "id": producto_id,
                 "nombre": nombre,
                 "cambios": cambios
@@ -194,21 +198,28 @@ def actualizar_monedas(data: CambioMonedaRequest):
     if not data.confirmar:
         return {
             "status": "pendiente",
-            "mensaje": f"Se encontraron {len(productos_para_cambiar)} productos con moneda {data.moneda_actual}.",
-            "productos_para_cambiar": productos_para_cambiar
+            "mensaje": f"Se encontraron {len(productos_para_actualizar)} productos con moneda {data.moneda_actual}.",
+            "productos_para_cambiar": productos_para_actualizar
         }
 
-    modificados = []
-    for p in productos_para_cambiar:
+    # Aplicar cambios
+    productos_modificados = []
+
+    for p in productos_para_actualizar:
         patch_url = f"{base_url}/api/v1/administration/product/{p['id']}"
-        patch_response = requests.patch(patch_url, json={"prices": p["cambios"]}, headers=headers)
+        patch_payload = {
+            "prices": p["cambios"]
+        }
+        patch_response = requests.patch(patch_url, json=patch_payload, headers=headers)
+
         if patch_response.status_code in [200, 201]:
-            modificados.append(p["nombre"])
+            productos_modificados.append(p["nombre"])
         else:
-            print(f"⚠️ Error modificando producto {p['nombre']}: {patch_response.text}")
+            print(f"⚠️ Error modificando '{p['nombre']}': {patch_response.status_code} - {patch_response.text}")
 
     return {
         "status": "ok",
-        "mensaje": f"Monedas actualizadas para {len(modificados)} productos",
-        "productos_actualizados": modificados
+        "mensaje": f"Se actualizó la moneda en {len(productos_modificados)} productos.",
+        "productos_actualizados": productos_modificados
     }
+
