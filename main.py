@@ -194,4 +194,5 @@ def actualizar_monedas(data: CambioMonedaRequest):
         "status": "ok",
         "mensaje": f"Monedas actualizadas para {len(modificados)} productos",
         "productos_actualizados": modificados
+    }
 
