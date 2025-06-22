@@ -171,13 +171,13 @@ def actualizar_monedas(data: CambioMonedaRequest):
     for producto in productos:
         producto_id = producto.get("id")
         nombre = producto.get("name")
-        precios = producto.get("prices", [])
+        precios = producto.get("prices", [])  # Aquí accedemos a la lista prices directamente
         cambios = []
 
         for precio in precios:
             if precio.get("codeCurrency") == data.moneda_actual:
                 cambios.append({
-                    "systemPriceId": precio.get("priceSystemId"),
+                    "priceSystemId": precio.get("priceSystemId"),
                     "price": precio.get("price"),
                     "codeCurrency": data.nueva_moneda
                 })
@@ -202,6 +202,8 @@ def actualizar_monedas(data: CambioMonedaRequest):
         patch_response = requests.patch(patch_url, json={"prices": p["cambios"]}, headers=headers)
         if patch_response.status_code in [200, 201]:
             modificados.append(p["nombre"])
+        else:
+            print(f"⚠️ Error modificando producto {p['nombre']}: {patch_response.text}")
 
     return {
         "status": "ok",
