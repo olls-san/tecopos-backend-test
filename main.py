@@ -11,12 +11,12 @@ user_context = {}
 class LoginData(BaseModel):
     usuario: str
     password: str
-    region: str = "apidev"  # Región por defecto para entorno de desarrollo
+    region: str = "apidev"
 
 class Producto(BaseModel):
     nombre: str
     precio: float
-    costo: float | None = None  # Costo opcional
+    costo: float | None = None
     moneda: str = Field(default="USD", description="Moneda del producto (USD, CUP o EUR)")
     tipo: str = Field(default="STOCK", description="Tipo de producto")
     categorias: list[str] = Field(default_factory=list)
@@ -26,16 +26,16 @@ class CambioMonedaRequest(BaseModel):
     usuario: str
     moneda_actual: str
     nueva_moneda: str
-    confirmar: bool = False  # Indica si el cambio debe aplicarse o solo mostrar los productos a cambiar
+    confirmar: bool = False
 
-# Helper para construir la URL base según la región
+# Helper para obtener la base URL
 def get_base_url(region: str) -> str:
     region = region.lower().strip()
     if region == "apidev":
         return "https://apidev.tecopos.com"
-    raise HTTPException(status_code=400, detail="Región inválida (solo 'apidev' permitido en modo desarrollo)")
+    raise HTTPException(status_code=400, detail="Región inválida")
 
-# Endpoint para autenticación y obtención de token y businessId
+# Endpoint de login
 @app.post("/login-tecopos")
 def login_tecopos(data: LoginData):
     base_url = get_base_url(data.region)
@@ -62,7 +62,7 @@ def login_tecopos(data: LoginData):
 
     token = response.json().get("token")
     if not token:
-        raise HTTPException(status_code=400, detail="Token no encontrado en la respuesta")
+        raise HTTPException(status_code=400, detail="Token no encontrado")
 
     headers_userinfo = headers.copy()
     headers_userinfo["Authorization"] = f"Bearer {token}"
@@ -73,7 +73,7 @@ def login_tecopos(data: LoginData):
 
     business_id = info_response.json().get("businessId")
     if not business_id:
-        raise HTTPException(status_code=400, detail="No se encontró el businessId del usuario")
+        raise HTTPException(status_code=400, detail="No se encontró el businessId")
 
     user_context[data.usuario] = {
         "token": token,
@@ -83,6 +83,7 @@ def login_tecopos(data: LoginData):
 
     return {"status": "ok", "mensaje": "Login exitoso", "businessid": business_id}
 
+# Crear producto
 @app.post("/crear-producto")
 def crear_producto(producto: Producto):
     context = user_context.get(producto.usuario)
@@ -140,6 +141,7 @@ def crear_producto(producto: Producto):
             }
         )
 
+# Actualizar monedas
 @app.post("/actualizar-monedas")
 def actualizar_monedas(data: CambioMonedaRequest):
     context = user_context.get(data.usuario)
@@ -171,13 +173,13 @@ def actualizar_monedas(data: CambioMonedaRequest):
     for producto in productos:
         producto_id = producto.get("id")
         nombre = producto.get("name")
-        precios = producto.get("prices", [])  # Aquí accedemos a la lista prices directamente
+        precios = producto.get("prices", [])
         cambios = []
 
         for precio in precios:
             if precio.get("codeCurrency") == data.moneda_actual:
                 cambios.append({
-                    "priceSystemId": precio.get("priceSystemId"),
+                    "systemPriceId": precio.get("systemPriceId"),  # <- Corregido
                     "price": precio.get("price"),
                     "codeCurrency": data.nueva_moneda
                 })
