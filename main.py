@@ -11,7 +11,7 @@ user_context = {}
 class LoginData(BaseModel):
     usuario: str
     password: str
-    region: str = "api0"  # Región por defecto
+    region: str = "apidev"  # Región por defecto para entorno de desarrollo
 
 class Producto(BaseModel):
     nombre: str
@@ -25,9 +25,9 @@ class Producto(BaseModel):
 # Helper para construir la URL base según la región
 def get_base_url(region: str) -> str:
     region = region.lower().strip()
-    if region in [f"api{i}" for i in range(5)]:
-        return f"https://{region}.tecopos.com"
-    raise HTTPException(status_code=400, detail="Región inválida")
+    if region == "apidev":
+        return "https://apidev.tecopos.com"
+    raise HTTPException(status_code=400, detail="Región inválida (solo 'apidev' permitido en modo desarrollo)")
 
 # Endpoint para autenticación y obtención de token y businessId
 @app.post("/login-tecopos")
@@ -44,8 +44,8 @@ def login_tecopos(data: LoginData):
     headers = {
         "Content-Type": "application/json",
         "Accept": "*/*",
-        "Origin": "https://admin.tecopos.com",
-        "Referer": "https://admin.tecopos.com/",
+        "Origin": "https://admindev.tecopos.com",
+        "Referer": "https://admindev.tecopos.com/",
         "x-app-origin": "Tecopos-Admin",
         "User-Agent": "Mozilla/5.0"
     }
@@ -70,7 +70,7 @@ def login_tecopos(data: LoginData):
     if not business_id:
         raise HTTPException(status_code=400, detail="No se encontró el businessId del usuario")
 
-    # Guardar sesión
+    # Guardar sesión del usuario
     user_context[data.usuario] = {
         "token": token,
         "businessId": business_id,
@@ -95,8 +95,8 @@ def crear_producto(producto: Producto):
         "Authorization": f"Bearer {token}",
         "Content-Type": "application/json",
         "Accept": "*/*",
-        "Origin": "https://admin.tecopos.com",
-        "Referer": "https://admin.tecopos.com/",
+        "Origin": "https://admindev.tecopos.com",
+        "Referer": "https://admindev.tecopos.com/",
         "x-app-businessid": str(businessid),
         "x-app-origin": "Tecopos-Admin",
         "User-Agent": "Mozilla/5.0"
@@ -136,3 +136,4 @@ def crear_producto(producto: Producto):
                 "respuesta": response.text
             }
         )
+
