@@ -168,7 +168,7 @@ def actualizar_monedas(data: CambioMonedaRequest):
     if lista_productos.status_code != 200:
         raise HTTPException(status_code=500, detail="No se pudo obtener productos")
 
-    productos = lista_productos.json()
+    productos = lista_productos.json().get("items", [])
     modificados = []
 
     for producto in productos:
