@@ -127,7 +127,7 @@ def entrada_inteligente(data: EntradaInteligenteRequest):
         if res_almacenes.status_code != 200:
             raise HTTPException(status_code=500, detail="No se pudieron obtener los almacenes")
 
-        stock_areas = res_almacenes.json()
+        stock_areas = res_almacenes.json().get("items", [])
         return {
             "status": "pendiente",
             "mensaje": "Seleccione un stockAreaId válido de la siguiente lista:",
@@ -193,4 +193,5 @@ def entrada_inteligente(data: EntradaInteligenteRequest):
         "mensaje": f"Entrada realizada correctamente en stockAreaId {data.stockAreaId}",
         "productos_procesados": [p.nombre for p in data.productos]
     }
+
 
