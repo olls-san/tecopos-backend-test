@@ -22,6 +22,11 @@ class Producto(BaseModel):
     categorias: list[str] = Field(default_factory=list)
     usuario: str
 
+class CambioMonedaRequest(BaseModel):
+    usuario: str
+    moneda_actual: str
+    nueva_moneda: str
+
 # Helper para construir la URL base según la región
 def get_base_url(region: str) -> str:
     region = region.lower().strip()
@@ -136,4 +141,57 @@ def crear_producto(producto: Producto):
                 "respuesta": response.text
             }
         )
+
+# Endpoint para cambiar moneda de precios existentes sin modificar el valor
+@app.post("/actualizar-monedas")
+def actualizar_monedas(data: CambioMonedaRequest):
+    context = user_context.get(data.usuario)
+    if not context:
+        raise HTTPException(status_code=403, detail="Usuario no autenticado")
+
+    token = context["token"]
+    businessid = context["businessId"]
+    base_url = get_base_url(context["region"])
+
+    list_url = f"{base_url}/api/v1/administration/product"
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept": "*/*",
+        "Origin": "https://admindev.tecopos.com",
+        "Referer": "https://admindev.tecopos.com/",
+        "x-app-businessid": str(businessid),
+        "x-app-origin": "Tecopos-Admin",
+        "User-Agent": "Mozilla/5.0"
+    }
+
+    lista_productos = requests.get(list_url, headers=headers)
+    if lista_productos.status_code != 200:
+        raise HTTPException(status_code=500, detail="No se pudo obtener productos")
+
+    productos = lista_productos.json()
+    modificados = []
+
+    for producto in productos:
+        producto_id = producto.get("id")
+        precios = producto.get("prices", [])
+        cambios = []
+
+        for precio in precios:
+            if precio.get("codeCurrency") == data.moneda_actual:
+                cambios.append({
+                    "systemPriceId": precio.get("systemPriceId"),
+                    "price": precio.get("price"),
+                    "codeCurrency": data.nueva_moneda
+                })
+
+        if cambios:
+            patch_url = f"{base_url}/api/v1/administration/product/{producto_id}"
+            patch_response = requests.patch(patch_url, json={"prices": cambios}, headers=headers)
+            if patch_response.status_code in [200, 201]:
+                modificados.append(producto["name"])
+
+    return {
+        "status": "ok",
+        "mensaje": f"Monedas actualizadas para {len(modificados)} productos",
+        "productos_actualizados": modificados
 
