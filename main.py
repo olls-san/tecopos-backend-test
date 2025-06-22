@@ -26,6 +26,7 @@ class CambioMonedaRequest(BaseModel):
     usuario: str
     moneda_actual: str
     nueva_moneda: str
+    confirmar: bool = False  # Indica si el cambio debe aplicarse o solo mostrar los productos a cambiar
 
 # Helper para construir la URL base según la región
 def get_base_url(region: str) -> str:
@@ -63,7 +64,6 @@ def login_tecopos(data: LoginData):
     if not token:
         raise HTTPException(status_code=400, detail="Token no encontrado en la respuesta")
 
-    # Obtener información del usuario (incluye businessId)
     headers_userinfo = headers.copy()
     headers_userinfo["Authorization"] = f"Bearer {token}"
 
@@ -75,7 +75,6 @@ def login_tecopos(data: LoginData):
     if not business_id:
         raise HTTPException(status_code=400, detail="No se encontró el businessId del usuario")
 
-    # Guardar sesión del usuario
     user_context[data.usuario] = {
         "token": token,
         "businessId": business_id,
@@ -84,7 +83,6 @@ def login_tecopos(data: LoginData):
 
     return {"status": "ok", "mensaje": "Login exitoso", "businessid": business_id}
 
-# Endpoint para crear producto
 @app.post("/crear-producto")
 def crear_producto(producto: Producto):
     context = user_context.get(producto.usuario)
@@ -142,7 +140,6 @@ def crear_producto(producto: Producto):
             }
         )
 
-# Endpoint para cambiar moneda de precios existentes sin modificar el valor
 @app.post("/actualizar-monedas")
 def actualizar_monedas(data: CambioMonedaRequest):
     context = user_context.get(data.usuario)
@@ -169,30 +166,45 @@ def actualizar_monedas(data: CambioMonedaRequest):
         raise HTTPException(status_code=500, detail="No se pudo obtener productos")
 
     productos = lista_productos.json().get("items", [])
-    modificados = []
+    productos_para_cambiar = []
 
     for producto in productos:
         producto_id = producto.get("id")
-        precios = producto.get("prices", [])  # <== Cambiado a 'prices'
+        nombre = producto.get("name")
+        precios = producto.get("prices", [])
         cambios = []
 
         for precio in precios:
             if precio.get("codeCurrency") == data.moneda_actual:
                 cambios.append({
-                    "systemPriceId": precio.get("systemPriceId"),
+                    "systemPriceId": precio.get("priceSystemId"),
                     "price": precio.get("price"),
                     "codeCurrency": data.nueva_moneda
                 })
 
         if cambios:
-            patch_url = f"{base_url}/api/v1/administration/product/{producto_id}"
-            patch_response = requests.patch(patch_url, json={"prices": cambios}, headers=headers)
-            if patch_response.status_code in [200, 201]:
-                modificados.append(producto["name"])
+            productos_para_cambiar.append({
+                "id": producto_id,
+                "nombre": nombre,
+                "cambios": cambios
+            })
+
+    if not data.confirmar:
+        return {
+            "status": "pendiente",
+            "mensaje": f"Se encontraron {len(productos_para_cambiar)} productos con moneda {data.moneda_actual}.",
+            "productos_para_cambiar": productos_para_cambiar
+        }
+
+    modificados = []
+    for p in productos_para_cambiar:
+        patch_url = f"{base_url}/api/v1/administration/product/{p['id']}"
+        patch_response = requests.patch(patch_url, json={"prices": p["cambios"]}, headers=headers)
+        if patch_response.status_code in [200, 201]:
+            modificados.append(p["nombre"])
 
     return {
         "status": "ok",
         "mensaje": f"Monedas actualizadas para {len(modificados)} productos",
         "productos_actualizados": modificados
     }
-
