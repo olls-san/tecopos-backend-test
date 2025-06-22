@@ -1,6 +1,8 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 import requests
+import time
+from typing import Optional
 
 app = FastAPI()
 
@@ -27,6 +29,18 @@ class CambioMonedaRequest(BaseModel):
     moneda_actual: str
     nueva_moneda: str
     confirmar: bool = False
+    forzar_todos: bool = False
+
+class ProductoEntradaInteligente(BaseModel):
+    nombre: str
+    cantidad: int
+    precio: float
+    moneda: str = "CUP"
+
+class EntradaInteligenteRequest(BaseModel):
+    usuario: str
+    stockAreaId: Optional[int] = 0  # Permite omitir o usar 0 como consulta
+    productos: list[ProductoEntradaInteligente]
 
 # Helper para obtener la base URL
 def get_base_url(region: str) -> str:
@@ -83,10 +97,12 @@ def login_tecopos(data: LoginData):
 
     return {"status": "ok", "mensaje": "Login exitoso", "businessid": business_id}
 
-# Crear producto
-@app.post("/crear-producto")
-def crear_producto(producto: Producto):
-    context = user_context.get(producto.usuario)
+@app.post("/entrada-inteligente")
+def entrada_inteligente(data: EntradaInteligenteRequest):
+    def normalizar(texto: str) -> str:
+        return texto.strip().lower()
+
+    context = user_context.get(data.usuario)
     if not context:
         raise HTTPException(status_code=403, detail="Usuario no autenticado")
 
@@ -94,7 +110,6 @@ def crear_producto(producto: Producto):
     businessid = context["businessId"]
     base_url = get_base_url(context["region"])
 
-    url = f"{base_url}/api/v1/administration/product"
     headers = {
         "Authorization": f"Bearer {token}",
         "Content-Type": "application/json",
@@ -106,131 +121,76 @@ def crear_producto(producto: Producto):
         "User-Agent": "Mozilla/5.0"
     }
 
-    payload = {
-        "type": producto.tipo,
-        "name": producto.nombre,
-        "prices": [
-            {
-                "price": producto.precio,
-                "codeCurrency": producto.moneda
-            }
-        ],
-        "images": []
-    }
+    if not data.stockAreaId or data.stockAreaId == 0:
+        stock_area_url = f"{base_url}/api/v1/administration/area?type=STOCK"
+        res_almacenes = requests.get(stock_area_url, headers=headers)
+        if res_almacenes.status_code != 200:
+            raise HTTPException(status_code=500, detail="No se pudieron obtener los almacenes")
 
-    if producto.costo is not None:
-        payload["cost"] = producto.costo
-
-    if producto.categorias:
-        payload["categories"] = producto.categorias
-
-    response = requests.post(url, json=payload, headers=headers)
-
-    if response.status_code in [200, 201]:
-        return {
-            "status": "ok",
-            "mensaje": "✅ Producto creado con éxito en Tecopos",
-            "respuesta": response.json()
-        }
-    else:
-        raise HTTPException(
-            status_code=response.status_code,
-            detail={
-                "error": "❌ No se pudo crear el producto",
-                "respuesta": response.text
-            }
-        )
-
-# Actualizar monedas
-class CambioMonedaRequest(BaseModel):
-    usuario: str
-    moneda_actual: str
-    nueva_moneda: str
-    confirmar: bool = False
-    forzar_todos: bool = False
-
-
-@app.post("/actualizar-monedas")
-def actualizar_monedas(data: CambioMonedaRequest):
-    context = user_context.get(data.usuario)
-    if not context:
-        raise HTTPException(status_code=403, detail="Usuario no autenticado")
-
-    token = context["token"]
-    businessid = context["businessId"]
-    base_url = get_base_url(context["region"])
-
-    list_url = f"{base_url}/api/v1/administration/product"
-    headers = {
-        "Authorization": f"Bearer {token}",
-        "Accept": "*/*",
-        "Origin": "https://admindev.tecopos.com",
-        "Referer": "https://admindev.tecopos.com/",
-        "x-app-businessid": str(businessid),
-        "x-app-origin": "Tecopos-Admin",
-        "User-Agent": "Mozilla/5.0"
-    }
-
-    response = requests.get(list_url, headers=headers)
-    if response.status_code != 200:
-        raise HTTPException(status_code=500, detail="No se pudo obtener productos")
-
-    productos = response.json().get("items", [])
-    productos_para_actualizar = []
-
-    for producto in productos:
-        producto_id = producto.get("id")
-        nombre = producto.get("name")
-        precios = producto.get("prices", [])
-
-        if len(precios) != 1 and not data.forzar_todos:
-            continue
-
-        cambios = []
-
-        for precio in precios:
-            price_system_id = precio.get("priceSystemId")  # viene como int
-            moneda_actual = precio.get("codeCurrency")
-            monto = precio.get("price")
-
-            if moneda_actual == data.moneda_actual and price_system_id is not None:
-                cambios.append({
-                    "systemPriceId": price_system_id,  # ✅ como int
-                    "price": monto,
-                    "codeCurrency": data.nueva_moneda
-                })
-
-        if cambios:
-            productos_para_actualizar.append({
-                "id": producto_id,
-                "nombre": nombre,
-                "cambios": cambios
-            })
-
-    if not data.confirmar:
+        stock_areas = res_almacenes.json()
         return {
             "status": "pendiente",
-            "mensaje": f"Se encontraron {len(productos_para_actualizar)} productos con moneda {data.moneda_actual}.",
-            "productos_para_cambiar": productos_para_actualizar
+            "mensaje": "Seleccione un stockAreaId válido de la siguiente lista:",
+            "almacenes": [
+                {"id": a["id"], "nombre": a["name"]} for a in stock_areas
+            ]
         }
 
-    productos_modificados = []
+    productos_a_insertar = []
 
-    for p in productos_para_actualizar:
-        patch_url = f"{base_url}/api/v1/administration/product/{p['id']}"
-        patch_payload = {
-            "prices": p["cambios"]
-        }
+    for producto in data.productos:
+        nombre_normalizado = normalizar(producto.nombre)
+        search_url = f"{base_url}/api/v1/administration/product?search={producto.nombre}"
+        res_busqueda = requests.get(search_url, headers=headers)
 
-        patch_response = requests.patch(patch_url, json=patch_payload, headers=headers)
+        if res_busqueda.status_code != 200:
+            raise HTTPException(status_code=500, detail=f"No se pudo buscar el producto '{producto.nombre}'")
 
-        if patch_response.status_code in [200, 201]:
-            productos_modificados.append(p["nombre"])
+        productos_encontrados = res_busqueda.json().get("items", [])
+        existente = next((p for p in productos_encontrados if normalizar(p.get("name", "")) == nombre_normalizado), None)
+
+        if existente:
+            product_id = existente["id"]
         else:
-            print(f"⚠️ Error modificando '{p['nombre']}': {patch_response.status_code} - {patch_response.text}")
+            crear_url = f"{base_url}/api/v1/administration/product"
+            crear_payload = {
+                "type": "STOCK",
+                "name": producto.nombre,
+                "prices": [
+                    {
+                        "price": producto.precio,
+                        "codeCurrency": producto.moneda
+                    }
+                ],
+                "images": []
+            }
+
+            crear_res = requests.post(crear_url, headers=headers, json=crear_payload)
+            if crear_res.status_code not in [200, 201]:
+                raise HTTPException(status_code=500, detail=f"No se pudo crear el producto '{producto.nombre}'")
+
+            product_id = crear_res.json().get("id")
+            time.sleep(0.5)
+
+        productos_a_insertar.append({
+            "productId": product_id,
+            "quantity": producto.cantidad
+        })
+
+    entrada_url = f"{base_url}/api/v1/administration/movement/bulk/entry"
+    entrada_payload = {
+        "products": productos_a_insertar,
+        "stockAreaId": data.stockAreaId,
+        "continue": False
+    }
+
+    entrada_res = requests.post(entrada_url, headers=headers, json=entrada_payload)
+    if entrada_res.status_code not in [200, 201]:
+        raise HTTPException(status_code=500, detail="No se pudo registrar la entrada")
 
     return {
         "status": "ok",
-        "mensaje": f"Se actualizó la moneda en {len(productos_modificados)} productos.",
-        "productos_actualizados": productos_modificados
+        "mensaje": f"Entrada realizada correctamente en stockAreaId {data.stockAreaId}",
+        "productos_procesados": [p.nombre for p in data.productos]
     }
+
