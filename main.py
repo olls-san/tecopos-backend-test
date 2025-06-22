@@ -142,6 +142,14 @@ def crear_producto(producto: Producto):
         )
 
 # Actualizar monedas
+class CambioMonedaRequest(BaseModel):
+    usuario: str
+    moneda_actual: str
+    nueva_moneda: str
+    confirmar: bool = False
+    forzar_todos: bool = False  # Nuevo parámetro
+
+
 @app.post("/actualizar-monedas")
 def actualizar_monedas(data: CambioMonedaRequest):
     context = user_context.get(data.usuario)
@@ -174,16 +182,21 @@ def actualizar_monedas(data: CambioMonedaRequest):
         producto_id = producto.get("id")
         nombre = producto.get("name")
         precios = producto.get("prices", [])
+
+        # Si hay más de un precio y no se forzó, se omite el producto
+        if len(precios) != 1 and not data.forzar_todos:
+            continue
+
         cambios = []
 
         for precio in precios:
-            price_system_id = precio.get("priceSystemId")  # <- viene como entero
+            price_system_id = precio.get("priceSystemId")
             moneda_actual = precio.get("codeCurrency")
             monto = precio.get("price")
 
             if moneda_actual == data.moneda_actual and price_system_id is not None:
                 cambios.append({
-                    "systemPriceId": str(price_system_id),  # <- corregido aquí
+                    "systemPriceId": str(price_system_id),
                     "price": monto,
                     "codeCurrency": data.nueva_moneda
                 })
@@ -202,7 +215,6 @@ def actualizar_monedas(data: CambioMonedaRequest):
             "productos_para_cambiar": productos_para_actualizar
         }
 
-    # Aplicar cambios
     productos_modificados = []
 
     for p in productos_para_actualizar:
