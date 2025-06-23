@@ -230,7 +230,7 @@ def entrada_inteligente(data: EntradaInteligenteRequest):
     procesados = []
     for prod in data.productos:
         producto_id = buscar_o_crear_producto(prod, base_url, headers)
-        entrada_url = f"{base_url}/api/v1/stock/product-entry"
+        entrada_url = f"{base_url}/api/v1/administration/movement/bulk/entry"
         entrada_payload = {
             "products": [
                 {"productId": producto_id, "quantity": prod.cantidad}
