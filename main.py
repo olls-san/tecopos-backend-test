@@ -74,33 +74,29 @@ def get_auth_headers(token: str, businessid: int) -> dict:
 def normalizar(texto: str) -> str:
     return texto.strip().lower()
 
-def buscar_o_crear_producto(producto: ProductoEntradaInteligente, base_url: str, headers: dict) -> int:
-    nombre_norm = normalizar(producto.nombre)
-    search_url = f"{base_url}/api/v1/administration/product?search={producto.nombre}"
-    res = requests.get(search_url, headers=headers)
+def inferir_categoria(nombre: str) -> str:
+    nombre = normalizar(nombre)
+    if any(palabra in nombre for palabra in ["cerveza", "ron", "vino"]):
+        return "Bebidas Alcohólicas"
+    if any(palabra in nombre for palabra in ["refresco", "soda", "jugos"]):
+        return "Refrescos"
+    return "Mercado"
 
+def obtener_o_crear_categoria(nombre_categoria: str, base_url: str, headers: dict) -> int:
+    cat_url = f"{base_url}/api/v1/administration/salescategory"
+    res = requests.get(cat_url, headers=headers)
     if res.status_code != 200:
-        raise HTTPException(status_code=500, detail=f"No se pudo buscar '{producto.nombre}'")
+        raise HTTPException(status_code=500, detail="No se pudieron consultar las categorías")
 
-    items = res.json().get("items", [])
-    existente = next((p for p in items if normalizar(p.get("name", "")) == nombre_norm), None)
-
+    categorias = res.json().get("items", [])
+    existente = next((c for c in categorias if normalizar(c.get("name", "")) == normalizar(nombre_categoria)), None)
     if existente:
         return existente["id"]
 
-    crear_url = f"{base_url}/api/v1/administration/product"
-    crear_payload = {
-        "type": "STOCK",
-        "name": producto.nombre,
-        "prices": [{"price": producto.precio, "codeCurrency": producto.moneda}],
-        "images": []
-    }
-
-    crear_res = requests.post(crear_url, headers=headers, json=crear_payload)
+    crear_res = requests.post(cat_url, headers=headers, json={"name": nombre_categoria})
     if crear_res.status_code not in [200, 201]:
-        raise HTTPException(status_code=500, detail=f"No se pudo crear '{producto.nombre}'")
+        raise HTTPException(status_code=500, detail="No se pudo crear la categoría")
 
-    time.sleep(0.5)
     return crear_res.json().get("id")
 
 # --------- ENDPOINTS ---------
@@ -140,8 +136,8 @@ def login_tecopos(data: LoginData):
 
     return {"status": "ok", "mensaje": "Login exitoso", "businessid": businessid}
 
-@app.post("/entrada-inteligente")
-def entrada_inteligente(data: EntradaInteligenteRequest):
+@app.post("/crear-producto-con-categoria")
+def crear_producto_con_categoria(data: Producto):
     ctx = user_context.get(data.usuario)
     if not ctx:
         raise HTTPException(status_code=403, detail="Usuario no autenticado")
@@ -149,37 +145,30 @@ def entrada_inteligente(data: EntradaInteligenteRequest):
     base_url = get_base_url(ctx["region"])
     headers = get_auth_headers(ctx["token"], ctx["businessId"])
 
-    if not data.stockAreaId:
-        url = f"{base_url}/api/v1/administration/area?type=STOCK"
-        res = requests.get(url, headers=headers)
-        if res.status_code != 200:
-            raise HTTPException(status_code=500, detail="No se pudieron obtener los almacenes")
-        return {
-            "status": "pendiente",
-            "mensaje": "Seleccione un stockAreaId válido:",
-            "almacenes": [{"id": a["id"], "nombre": a["name"]} for a in res.json().get("items", [])]
-        }
+    categoria_nombre = data.categorias[0] if data.categorias else inferir_categoria(data.nombre)
+    categoria_id = obtener_o_crear_categoria(categoria_nombre, base_url, headers)
 
-    productos_a_insertar = [
-        {"productId": buscar_o_crear_producto(p, base_url, headers), "quantity": p.cantidad}
-        for p in data.productos
-    ]
-
-    entrada_url = f"{base_url}/api/v1/administration/movement/bulk/entry"
-    payload = {
-        "products": productos_a_insertar,
-        "stockAreaId": data.stockAreaId,
-        "continue": False
+    crear_payload = {
+        "type": data.tipo,
+        "name": data.nombre,
+        "prices": [
+            {
+                "price": data.precio,
+                "codeCurrency": data.moneda
+            }
+        ],
+        "images": [],
+        "salesCategoryId": categoria_id
     }
 
-    res = requests.post(entrada_url, headers=headers, json=payload)
-    if res.status_code not in [200, 201]:
-        raise HTTPException(status_code=500, detail="No se pudo registrar la entrada")
+    crear_url = f"{base_url}/api/v1/administration/product"
+    crear_res = requests.post(crear_url, headers=headers, json=crear_payload)
+    if crear_res.status_code not in [200, 201]:
+        raise HTTPException(status_code=500, detail="No se pudo crear el producto")
 
     return {
         "status": "ok",
-        "mensaje": f"Entrada registrada en stockAreaId {data.stockAreaId}",
-        "productos_procesados": [p.nombre for p in data.productos]
+        "mensaje": f"Producto '{data.nombre}' creado en categoría '{categoria_nombre}'",
+        "respuesta": crear_res.json()
     }
-
 
