@@ -207,7 +207,47 @@ def crear_producto_con_categoria(data: Producto):
 
 @app.post("/entrada-inteligente")
 def entrada_inteligente(data: EntradaInteligenteRequest):
-    ...
+    ctx = user_context.get(data.usuario)
+    if not ctx:
+        raise HTTPException(status_code=403, detail="Usuario no autenticado")
+
+    base_url = get_base_url(ctx["region"])
+    headers = get_auth_headers(ctx["token"], ctx["businessId"])
+
+    if not data.stockAreaId:
+        almacenes_url = f"{base_url}/api/v1/administration/area?type=STOCK"
+        res = requests.get(almacenes_url, headers=headers)
+        if res.status_code != 200:
+            raise HTTPException(status_code=500, detail="No se pudieron obtener los almacenes")
+
+        almacenes = res.json().get("items", [])
+        return {
+            "status": "ok",
+            "mensaje": "Seleccione un área de stock",
+            "almacenes": [{"id": a["id"], "nombre": a["name"]} for a in almacenes]
+        }
+
+    procesados = []
+    for prod in data.productos:
+        producto_id = buscar_o_crear_producto(prod, base_url, headers)
+        entrada_url = f"{base_url}/api/v1/stock/product-entry"
+        entrada_payload = {
+            "products": [
+                {"productId": producto_id, "quantity": prod.cantidad}
+            ],
+            "stockAreaId": data.stockAreaId,
+            "continue": False
+        }
+        entrada_res = requests.post(entrada_url, headers=headers, json=entrada_payload)
+        if entrada_res.status_code not in [200, 201]:
+            raise HTTPException(status_code=500, detail=f"No se pudo dar entrada a '{prod.nombre}'")
+        procesados.append(prod.nombre)
+
+    return {
+        "status": "ok",
+        "mensaje": "Productos procesados correctamente",
+        "productos_procesados": procesados
+    }
 
 @app.post("/actualizar-monedas")
 def actualizar_monedas(data: CambioMonedaRequest):
