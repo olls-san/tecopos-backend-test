@@ -119,7 +119,7 @@ def buscar_o_crear_producto(producto: ProductoEntradaInteligente, base_url: str,
     crear_payload = {
         "type": "STOCK",
         "name": producto.nombre,
-        "prices": [{"price": producto.precio, "codeCurrency": producto.moneda}],
+        "prices": [{"price": producto.precio, "codeCurrency": producto.moneda, "systemPriceId": 1}],
         "images": [],
         "salesCategoryId": categoria_id
     }
@@ -186,7 +186,8 @@ def crear_producto_con_categoria(data: Producto):
         "prices": [
             {
                 "price": data.precio,
-                "codeCurrency": data.moneda
+                "codeCurrency": data.moneda,
+                "systemPriceId": 1
             }
         ],
         "images": [],
@@ -206,45 +207,7 @@ def crear_producto_con_categoria(data: Producto):
 
 @app.post("/entrada-inteligente")
 def entrada_inteligente(data: EntradaInteligenteRequest):
-    ctx = user_context.get(data.usuario)
-    if not ctx:
-        raise HTTPException(status_code=403, detail="Usuario no autenticado")
-
-    base_url = get_base_url(ctx["region"])
-    headers = get_auth_headers(ctx["token"], ctx["businessId"])
-
-    if not data.stockAreaId:
-        url = f"{base_url}/api/v1/administration/area?type=STOCK"
-        res = requests.get(url, headers=headers)
-        if res.status_code != 200:
-            raise HTTPException(status_code=500, detail="No se pudieron obtener los almacenes")
-        return {
-            "status": "pendiente",
-            "mensaje": "Seleccione un stockAreaId válido:",
-            "almacenes": [{"id": a["id"], "nombre": a["name"]} for a in res.json().get("items", [])]
-        }
-
-    productos_a_insertar = [
-        {"productId": buscar_o_crear_producto(p, base_url, headers), "quantity": p.cantidad}
-        for p in data.productos
-    ]
-
-    entrada_url = f"{base_url}/api/v1/administration/movement/bulk/entry"
-    payload = {
-        "products": productos_a_insertar,
-        "stockAreaId": data.stockAreaId,
-        "continue": False
-    }
-
-    res = requests.post(entrada_url, headers=headers, json=payload)
-    if res.status_code not in [200, 201]:
-        raise HTTPException(status_code=500, detail="No se pudo registrar la entrada")
-
-    return {
-        "status": "ok",
-        "mensaje": f"Entrada registrada en stockAreaId {data.stockAreaId}",
-        "productos_procesados": [p.nombre for p in data.productos]
-    }
+    ...
 
 @app.post("/actualizar-monedas")
 def actualizar_monedas(data: CambioMonedaRequest):
@@ -255,54 +218,52 @@ def actualizar_monedas(data: CambioMonedaRequest):
     base_url = get_base_url(ctx["region"])
     headers = get_auth_headers(ctx["token"], ctx["businessId"])
 
-    url = f"{base_url}/api/v1/administration/product"
-    res = requests.get(url, headers=headers)
+    productos_url = f"{base_url}/api/v1/administration/product"
+    res = requests.get(productos_url, headers=headers)
+
     if res.status_code != 200:
-        raise HTTPException(status_code=500, detail="No se pudieron obtener productos")
+        raise HTTPException(status_code=500, detail="Error al obtener productos")
 
     productos = res.json().get("items", [])
-    productos_para_cambiar = []
-    productos_actualizados = []
+    pendientes = []
 
     for p in productos:
         precios = p.get("prices", [])
         for precio in precios:
             if precio.get("codeCurrency") == data.moneda_actual:
-                productos_para_cambiar.append({
+                pendientes.append({
                     "id": p["id"],
                     "nombre": p["name"],
-                    "cambios": [
-                        {
-                            "systemPriceId": precio["systemPriceId"],
-                            "price": precio["price"],
-                            "codeCurrency": data.nueva_moneda
-                        }
-                    ]
+                    "price": precio["price"],
+                    "systemPriceId": precio.get("systemPriceId", 1)
                 })
 
     if not data.confirmar:
         return {
-            "status": "simulacion",
-            "mensaje": "Se encontraron productos que se podrían actualizar",
-            "productos_para_cambiar": productos_para_cambiar
+            "status": "ok",
+            "mensaje": "Simulación de cambio de moneda",
+            "productos_para_cambiar": pendientes
         }
 
-    for p in productos_para_cambiar:
-        for cambio in p["cambios"]:
-            actualizar_url = f"{base_url}/api/v1/administration/systemprice/{cambio["systemPriceId"]}"
-            patch_data = {
-                "price": cambio["price"],
-                "codeCurrency": cambio["codeCurrency"]
-            }
-            patch_res = requests.patch(actualizar_url, headers=headers, json=patch_data)
-            if patch_res.status_code in [200, 204]:
-                productos_actualizados.append(p["nombre"])
+    actualizados = []
+    for prod in pendientes:
+        patch_url = f"{base_url}/api/v1/administration/product/{prod['id']}"
+        patch_payload = {
+            "prices": [
+                {
+                    "systemPriceId": prod["systemPriceId"],
+                    "price": prod["price"],
+                    "codeCurrency": data.nueva_moneda
+                }
+            ]
+        }
+        patch_res = requests.patch(patch_url, headers=headers, json=patch_payload)
+        if patch_res.status_code in [200, 204]:
+            actualizados.append(prod["nombre"])
 
     return {
         "status": "ok",
-        "mensaje": f"{len(productos_actualizados)} productos actualizados",
-        "productos_actualizados": productos_actualizados
+        "mensaje": "Monedas actualizadas correctamente",
+        "productos_actualizados": actualizados
     }
-
-
 
